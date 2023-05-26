@@ -852,6 +852,8 @@ private:
                             });
                         }
                         return e.udp.channel.send(e.udp.dst, std::move(p));;
+                    }).handle_exception_type([](std::system_error const& e){
+                        dns_log.warn("UDP send exception: {}", e.what());
                     }).finally([fd, me = shared_from_this()] {
                         me->release(fd);
                     });
