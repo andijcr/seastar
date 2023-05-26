@@ -37,6 +37,10 @@
 #include <seastar/core/reactor.hh>
 #include <seastar/core/gate.hh>
 #include <seastar/core/print.hh>
+#include <seastar/core/sleep.hh>
+#include <system_error>
+
+using namespace std::literals;
 
 namespace seastar::net {
 
@@ -840,7 +844,13 @@ private:
                     break;
                 case type::udp:
                     // always chain UDP sends
-                    e.udp.f = e.udp.f.finally([&e, p = std::move(p)]() mutable {
+                    e.udp.f = e.udp.f.finally([&e, p = std::move(p), bt=current_backtrace()]() mutable ->future<> {
+                        if(rand() % 100 < 5) {
+                            return sleep(2s).then([bt]()->future<>{
+                                throw std::system_error(ETIMEDOUT, std::generic_category(), fmt::format("injected, {}", bt));
+                                return make_ready_future<>();
+                            });
+                        }
                         return e.udp.channel.send(e.udp.dst, std::move(p));;
                     }).finally([fd, me = shared_from_this()] {
                         me->release(fd);
