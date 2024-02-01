@@ -108,10 +108,11 @@ public:
 
     /// \cond internal
     /// \brief used to hold the log format string and the caller's source_location.
+    template<typename... Ts>
     struct format_info {
         /// implicitly construct format_info from a const char* format string.
         /// \param fmt - {fmt} style format string
-        format_info(const char* format, compat::source_location loc = compat::source_location::current()) noexcept
+   /*     format_info(const char* format, compat::source_location loc = compat::source_location::current()) noexcept
             : format(format)
             , loc(loc)
         {}
@@ -121,12 +122,15 @@ public:
             : format(format)
             , loc(loc)
         {}
+*/
         /// implicitly construct format_info with no format string.
         format_info(compat::source_location loc = compat::source_location::current()) noexcept
             : format()
             , loc(loc)
         {}
-        std::string_view format;
+    
+        format_info(fmt::format_string<Ts...> fmt, compat::source_location log=compat::source_location::current()) noexcept: format(fmt), loc(loc) {}
+        fmt::format_string<Ts...> format;
         compat::source_location loc;
     };
 
@@ -134,7 +138,7 @@ private:
 
     // We can't use an std::function<> as it potentially allocates.
     void do_log(log_level level, log_writer& writer);
-    void failed_to_log(std::exception_ptr ex, format_info fmt) noexcept;
+    void failed_to_log(std::exception_ptr ex, fmt::string_view fmt_str, compat::source_location fmt_loc) noexcept;
 public:
     /// Apply a rate limit to log message(s)
     ///
@@ -200,19 +204,15 @@ public:
     /// \param args - args to print string
     ///
     template <typename... Args>
-    void log(log_level level, format_info fmt, Args&&... args) noexcept {
+    void log(log_level level, fmt::format_string<Args...> fmt, Args&&... args) noexcept {
         if (is_enabled(level)) {
             try {
                 lambda_log_writer writer([&] (internal::log_buf::inserter_iterator it) {
-#if FMT_VERSION >= 80000
-                    return fmt::format_to(it, fmt::runtime(fmt.format), std::forward<Args>(args)...);
-#else
-                    return fmt::format_to(it, fmt.format, std::forward<Args>(args)...);
-#endif
+                    return fmt::format_to(it, fmt, std::forward<Args>(args)...);
                 });
                 do_log(level, writer);
             } catch (...) {
-                failed_to_log(std::current_exception(), std::move(fmt));
+                failed_to_log(std::current_exception(), fmt, compat::source_location::current());
             }
         }
     }
@@ -232,22 +232,18 @@ public:
     /// \param args - args to print string
     ///
     template <typename... Args>
-    void log(log_level level, rate_limit& rl, format_info fmt, Args&&... args) noexcept {
+    void log(log_level level, rate_limit& rl, fmt::format_string<Args...> fmt, Args&&... args) noexcept {
         if (is_enabled(level) && rl.check()) {
             try {
                 lambda_log_writer writer([&] (internal::log_buf::inserter_iterator it) {
                     if (rl.has_dropped_messages()) {
                         it = fmt::format_to(it, "(rate limiting dropped {} similar messages) ", rl.get_and_reset_dropped_messages());
                     }
-#if FMT_VERSION >= 80000
-                    return fmt::format_to(it, fmt::runtime(fmt.format), std::forward<Args>(args)...);
-#else
-                    return fmt::format_to(it, fmt.format, std::forward<Args>(args)...);
-#endif
+                    return fmt::format_to(it, fmt, std::forward<Args>(args)...);
                 });
                 do_log(level, writer);
             } catch (...) {
-                failed_to_log(std::current_exception(), std::move(fmt));
+                failed_to_log(std::current_exception(), fmt, compat::source_location::current());
             }
         }
     }
@@ -262,12 +258,12 @@ public:
     /// avoid any allocations. The \arg writer will be passed a
     /// internal::log_buf::inserter_iterator that allows it to write into the log
     /// buffer directly, avoiding the use of any intermediary buffers.
-    void log(log_level level, log_writer& writer, format_info fmt = {}) noexcept {
+    void log(log_level level, log_writer& writer, fmt::format_string<> fmt = "") noexcept {
         if (is_enabled(level)) {
             try {
                 do_log(level, writer);
             } catch (...) {
-                failed_to_log(std::current_exception(), std::move(fmt));
+                failed_to_log(std::current_exception(), fmt, compat::source_location::current());
             }
         }
     }
@@ -281,7 +277,7 @@ public:
     /// internal::log_buf::inserter_iterator that allows it to write into the log
     /// buffer directly, avoiding the use of any intermediary buffers.
     /// This is rate-limited version, see \ref rate_limit.
-    void log(log_level level, rate_limit& rl, log_writer& writer, format_info fmt = {}) noexcept {
+    void log(log_level level, rate_limit& rl, log_writer& writer, fmt::format_string<> fmt = "") noexcept {
         if (is_enabled(level) && rl.check()) {
             try {
                 lambda_log_writer writer_wrapper([&] (internal::log_buf::inserter_iterator it) {
@@ -292,7 +288,7 @@ public:
                 });
                 do_log(level, writer_wrapper);
             } catch (...) {
-                failed_to_log(std::current_exception(), std::move(fmt));
+                failed_to_log(std::current_exception(), fmt, compat::source_location::current());
             }
         }
     }
@@ -306,7 +302,7 @@ public:
     /// \param args - args to print string
     ///
     template <typename... Args>
-    void error(format_info fmt, Args&&... args) noexcept {
+    void error(fmt::format_string<Args...> fmt, Args&&... args) noexcept {
         log(log_level::error, std::move(fmt), std::forward<Args>(args)...);
     }
     /// Log with warning tag:
@@ -317,7 +313,7 @@ public:
     /// \param args - args to print string
     ///
     template <typename... Args>
-    void warn(format_info fmt, Args&&... args) noexcept {
+    void warn(fmt::format_string<Args...> fmt, Args&&... args) noexcept {
         log(log_level::warn, std::move(fmt), std::forward<Args>(args)...);
     }
     /// Log with info tag:
@@ -328,7 +324,7 @@ public:
     /// \param args - args to print string
     ///
     template <typename... Args>
-    void info(format_info fmt, Args&&... args) noexcept {
+    void info(fmt::format_string<Args...> fmt, Args&&... args) noexcept {
         log(log_level::info, std::move(fmt), std::forward<Args>(args)...);
     }
     /// Log with info tag on shard zero only:
@@ -339,7 +335,7 @@ public:
     /// \param args - args to print string
     ///
     template <typename... Args>
-    void info0(format_info fmt, Args&&... args) noexcept {
+    void info0(fmt::format_string<Args...> fmt, Args&&... args) noexcept {
         if (is_shard_zero()) {
             log(log_level::info, std::move(fmt), std::forward<Args>(args)...);
         }
@@ -352,7 +348,7 @@ public:
     /// \param args - args to print string
     ///
     template <typename... Args>
-    void debug(format_info fmt, Args&&... args) noexcept {
+    void debug(fmt::format_string<Args...> fmt, Args&&... args) noexcept {
         log(log_level::debug, std::move(fmt), std::forward<Args>(args)...);
     }
     /// Log with trace tag:
@@ -363,7 +359,7 @@ public:
     /// \param args - args to print string
     ///
     template <typename... Args>
-    void trace(format_info fmt, Args&&... args) noexcept {
+    void trace(fmt::format_string<Args...> fmt, Args&&... args) noexcept {
         log(log_level::trace, std::move(fmt), std::forward<Args>(args)...);
     }
 
@@ -402,6 +398,9 @@ public:
     ///       before syslogd can clear it) but can happen.
     static void set_syslog_enabled(bool enabled) noexcept;
 };
+
+//template<typename... Ts>
+//logger::format_info(Ts&&... args) -> logger::format_info<Ts...>;
 
 /// \brief used to keep a static registry of loggers
 /// since the typical use case is to do:
